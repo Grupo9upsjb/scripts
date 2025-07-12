@@ -1,0 +1,300 @@
+---
+title: "Imputación de datos usando el paquete MICE"
+author: "Kevin J. Paez"
+format: html
+---
+
+GRUPO 09
+
+```{r}
+install.packages("mice")
+install.packages("ggmice")
+```
+```{r}
+install.packages("tidyverse")
+```
+```{r}
+install.packages("here")
+```
+```{r}
+install.packages("rio")
+```
+```{r}
+install.packages("gtsummary")
+```
+```{r}
+library(mice)
+library(tidyverse)
+library(here)
+library(rio)
+library(ggmice)
+library(gtsummary)
+```
+
+## 1 Datos perdidos en investigación en salud
+
+## 2 Imputación de datos
+
+## 3 El dataset para este ejercicio
+
+
+Cargando los datos
+
+```{r}
+data_sm <- import(here("data", "diabetes.csv"))
+```
+
+Un vistazo a los datos
+
+```{r}
+head(data_sm)
+```
+
+## 4 Realizando la imputación de datos
+
+### 4.1 ¿Donde estan los valores perdidos?
+
+Es importante saber en qué variables se encuentran los datos antes de iniciar la inputación. Una forma rápida es usando la función `colSums()` es `is.na()`.
+
+```{r}
+colSums(is.na(data_sm))
+```
+
+Incluso mejor, podemos visualizar los datos perdidos en un mapa de calor usando la función `plot_pattern()` de **ggmice**.
+
+```{r}
+data_sm |>
+  select(
+    edad,
+    num_embarazos,
+    glucosa_2h,
+    presion_sanguinea,
+    pliegue_triceps,
+    insulina_2h,
+    imc,
+    historial_diabetes,
+    diabetes_5a
+  ) |>
+  ggmice::plot_pattern(
+    square = TRUE,
+    rotate = TRUE
+  )
+```
+INTERPRETACIÓN
+El número total de valores perdidos en el dataset data_sm es de 652. Las variables con mayor cantidad de valores faltantes son:
+
+insulina_2h: 374 valores perdidos
+
+pliegue_triceps: 227 valores perdidos
+
+presion_sanguinea: 35 valores perdidos
+
+imc: 11 valores perdidos
+
+glucosa_2h: 5 valores perdidos
+
+Las demás variables (edad, num_embarazos, historial_diabetes, diabetes_5a) no presentan valores faltantes.
+
+Además, se observa que hay varios pacientes con datos faltantes en dos o más variables al mismo tiempo, lo cual puede afectar los análisis posteriores si no se imputa o maneja adecuadamente esta información.
+
+### 4.2 Comparación de participantes con y sin valores perdidos
+```{r}
+tabla_glucosa = data_sm |> 
+  dplyr::select(
+      edad,
+      num_embarazos,
+      presion_sanguinea,
+      imc,
+      insulina_2h,
+      glucosa_2h,
+      pliegue_triceps,
+      historial_diabetes,
+      diabetes_5a
+    ) |>
+  mutate(missing = factor(
+    is.na(glucosa_2h),
+    levels = c(FALSE, TRUE),
+    labels = c("Sin valores perdidos", "Con valores perdidos")
+  )) |> 
+  tbl_summary(
+    by = missing,
+    statistic = list(
+      all_continuous()  ~ "{mean} ({sd})",
+      all_categorical() ~ "{n}    ({p}%)")
+    ) |> 
+  modify_header(label = "**Variable**",
+                all_stat_cols() ~ "**{level}**<br>N = {n} ({style_percent(p, digits=1)}%)") |> 
+  modify_caption("Características de los participantes según valor perdido en glucosa_2h") |> 
+  bold_labels()
+
+tabla_imc = data_sm |> 
+  dplyr::select(
+      edad,
+      num_embarazos,
+      presion_sanguinea,
+      imc,
+      insulina_2h,
+      glucosa_2h,
+      pliegue_triceps,
+      historial_diabetes,
+      diabetes_5a
+    ) |>
+  mutate(missing = factor(
+    is.na(imc),
+    levels = c(FALSE, TRUE),
+    labels = c("Sin valores perdidos", "Con valores perdidos")
+  )) |> 
+  tbl_summary(
+    by = missing,
+    statistic = list(
+      all_continuous()  ~ "{mean} ({sd})",
+      all_categorical() ~ "{n}    ({p}%)")
+    ) |> 
+  modify_header(label = "**Variable**",
+                all_stat_cols() ~ "**{level}**<br>N = {n} ({style_percent(p, digits=1)}%)") |> 
+  modify_caption("Características de los participantes según valor perdido en imc") |> 
+  bold_labels()
+
+tabla <- tbl_merge(
+  tbls = list(tabla_glucosa, tabla_imc),
+  tab_spanner = c("**Glucosa_2h**", "**IMC**")
+)
+```
+
+```{r}
+tabla
+```
+
+
+### 4.3 ¿Qué variables debo incluir en el proceso de imputación?
+
+```{r}
+input_data =
+  data_sm |>
+    dplyr::select(
+      edad,
+      num_embarazos,
+      presion_sanguinea,
+      imc,
+      insulina_2h,
+      glucosa_2h,
+      pliegue_triceps,
+      historial_diabetes,
+      diabetes_5a
+    ) |> 
+  mutate(diabetes_5a = as.factor(diabetes_5a))
+```
+
+### 4.4 La función `mice()` para imputar datos
+
+```{r}
+names(input_data)
+```
+
+El método de imputación la indicaremos con el argumento `method` en el mismo orden que aparecen las variables en el dataset.
+
+```{r}
+data_imputada =
+  mice(
+    input_data,
+    m = 20,
+    method = c(
+      "",
+      "",
+      "",
+      "pmm",
+      "",
+      "pmm",
+      "",
+      "",
+      "logreg"),
+    maxit = 20,
+    seed = 3,
+    print = F
+    )
+```
+
+```{r}
+data_imputada
+```
+
+El número de imputaciones (20)
+
+## 5 Analizando los datos imputados
+
+Para la variable glucosa_2h
+
+```{r}
+ggmice(data_imputada, aes(x = .imp, y = glucosa_2h)) +
+  geom_jitter(height = 0, width = 0.25) +
+  geom_boxplot(width = 0.5, size = 1, alpha = 0.55, outlier.shape = NA) +
+  labs(x = "Imputation number")
+```
+
+Para la variables IMC
+
+```{r}
+ggmice(data_imputada, aes(x = .imp, y = imc)) +
+  geom_jitter(height = 0, width = 0.25) +
+  geom_boxplot(width = 0.5, size = 1, alpha = 0.55, outlier.shape = NA) +
+  labs(x = "Imputation number")
+```
+
+En este gráfico, los datos observados (azul) se muestran al inicio y los valores imputados (rosado) para cada una de las 20 imputaciones múltiples aparecen a la derecha. Se observa que la distribución de los valores imputados es similar a la distribución de los valores observados, lo cual es deseable. Esto sugiere que el modelo de imputación está funcionando correctamente y que los valores completados son plausibles, es decir, no extremos ni fuera del rango lógico, manteniendo la variabilidad natural de los datos.
+
+
+
+Para datos categóricos, podemos crear una tabla de dos entradas comparando la distribución de la variable con datos completos e incompletos. Esto requiere primero crear la versión "long" de la data imputada.
+
+```{r}
+data_imputada_l <- complete(data_imputada, "long", include = TRUE)
+```
+
+Ahora la tabla.
+
+```{r}
+data_imputada_l <- data_imputada_l %>% 
+  mutate(imputed = .imp > 0,
+         imputed = factor(imputed,
+                          levels = c(FALSE, TRUE),
+                          labels = c("Observado", "Imputado")))
+
+prop.table(table(data_imputada_l$diabetes_5a,
+                 data_imputada_l$imputed),
+           margin = 2)
+```
+
+
+### 5.1 Procedimientos adicionales luego de la imputación
+
+```{r}
+
+tabla_multi <-
+  data_imputada |> 
+  with(glm(diabetes_5a ~ edad + num_embarazos + presion_sanguinea + 
+             imc + insulina_2h + glucosa_2h + 
+             pliegue_triceps + historial_diabetes,
+           family = binomial(link = "logit"))) |> 
+  tbl_regression(exponentiate = TRUE,
+                 label = list(
+                   edad ~ "Edad",
+                   num_embarazos ~ "N° de embarazos",
+                   presion_sanguinea ~ "Presión sanguínea",
+                   imc ~ "Índice de Masa Corporal",
+                   insulina_2h ~ "Insulina 2h",
+                   glucosa_2h ~ "Glucosa 2h",
+                   pliegue_triceps ~ "Pliegue tricipital",
+                   historial_diabetes ~ "Historial familiar de diabetes")) |>
+  bold_p(t = 0.05) |>
+  modify_header(estimate = "**OR ajustado**", p.value = "**p valor** ")
+```
+
+```{r}
+tabla_multi
+```
+En el modelo de regresión logística multivariada, se identificaron tres variables asociadas de manera estadísticamente significativa con la presencia de diabetes a los 5 años:
+
+- Índice de Masa Corporal (IMC): por cada aumento de una unidad en el IMC, la probabilidad de desarrollar diabetes aumenta en un 7% (OR = 1.07; IC 95%: 1.02–1.13; p = 0.011).
+- Glucosa a las 2 horas: un aumento en los niveles de glucosa se asocia con un incremento del 4% en la probabilidad de tener diabetes (OR = 1.04; IC 95%: 1.03–1.05; p < 0.001).
+- Historial familiar de diabetes: quienes tienen antecedentes familiares presentan un riesgo 2.9 veces mayor de desarrollar diabetes (OR = 2.90; IC 95%: 1.28–6.56; p = 0.011).
+Las demás variables, como edad, presión sanguínea o número de embarazos, no mostraron asociación significativa en este modelo.
